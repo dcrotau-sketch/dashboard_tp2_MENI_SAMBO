@@ -1,0 +1,328 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Châteaux et demeures d'Île-de-France</title>
+
+  <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f2f5fa;
+      color: #203047;
+    }
+    header {
+      background: #18385e;
+      color: white;
+      padding: 26px;
+      text-align: center;
+    }
+    header h1 { margin: 0 0 10px; }
+    main {
+      max-width: 1250px;
+      margin: auto;
+      padding: 24px;
+    }
+    .indicateurs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .carte-stat {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      text-align: center;
+      box-shadow: 0 2px 8px #0001;
+    }
+    .chiffre {
+      font-size: 32px;
+      font-weight: bold;
+      color: #1763a5;
+      margin-top: 12px;
+    }
+    .contenu {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 18px;
+    }
+    section {
+      background: white;
+      padding: 18px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px #0001;
+    }
+    #map {
+      height: 440px;
+      border-radius: 8px;
+    }
+    .barre {
+      height: 22px;
+      margin: 8px 0 18px;
+      border-radius: 4px;
+      min-width: 2px;
+    }
+    .legende {
+      font-size: 13px;
+      margin-top: 10px;
+    }
+    #message { color: #a52a2a; }
+    footer {
+      text-align: center;
+      padding: 18px;
+      color: #64748b;
+    }
+    @media (max-width: 750px) {
+      .indicateurs, .contenu {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Châteaux et demeures d'Île-de-France</h1>
+    <p>Tableau de bord SIG — TP2 ESTP</p>
+    <p>MENI Daniel — SAMBO Nabil</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Présentation du projet</h2>
+      <p>
+        Ce tableau de bord présente la répartition spatiale
+        des châteaux et demeures d'Île-de-France.
+        L'analyse repose sur les données géographiques
+        étudiées dans ArcGIS Pro.
+      </p>
+    </section>
+
+    <div class="indicateurs">
+      <div class="carte-stat">
+        Nombre total de sites
+        <div class="chiffre" id="total">—</div>
+      </div>
+      <div class="carte-stat">
+        Nombre de catégories
+        <div class="chiffre" id="categories">—</div>
+      </div>
+      <div class="carte-stat">
+        Catégorie dominante
+        <div class="chiffre" id="dominante"
+          style="font-size:18px">—</div>
+      </div>
+    </div>
+
+    <div class="contenu">
+      <section>
+        <h2>Carte interactive</h2>
+        <div id="map"></div>
+        <p class="legende">
+          Cliquez sur un château pour consulter
+          ses informations.
+        </p>
+      </section>
+
+      <section>
+        <h2>Répartition par catégorie</h2>
+        <div id="graphique">Chargement...</div>
+      </section>
+    </div>
+
+    <section>
+      <h2>Analyse des résultats</h2>
+      <p id="interpretation">
+        Les résultats seront calculés à partir
+        des données GeoJSON.
+      </p>
+      <p id="message"></p>
+    </section>
+  </main>
+
+  <footer>ESTP — SIG & CIM — TP2</footer>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+  </script>
+
+  <script>
+    // Initialisation de la carte
+    const map = L.map("map").setView([48.75, 2.45], 9);
+
+    L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        attribution: "&copy; OpenStreetMap contributors",
+        maxZoom: 19
+      }
+    ).addTo(map);
+
+    const couleurs = [
+      "#b43b58", "#51a351", "#26a9d2",
+      "#5b50c6", "#e39b22", "#888888"
+    ];
+
+    // Affichage sécurisé des textes provenant du fichier
+    function texte(value) {
+      return String(value ?? "Non renseigné")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    // Chargement des données exportées depuis ArcGIS Pro
+    fetch("data/chateaux_idf.geojson")
+      .then(response => {
+        if (!response.ok) {
+          throw new Error("Fichier GeoJSON introuvable");
+        }
+        return response.json();
+      })
+      .then(data  => {
+        const entites = data.features || [];
+
+        // Recherche automatique du champ de catégorie
+        const champs = Object.keys(
+          entites[0]?.properties || {}
+        );
+
+        const champCategorie = champs.find(n =>
+          /^(categorie|catégorie|category|classe|type|interet|intérêt)$/i
+            .test(n)
+        ) || champs.find(n =>
+          /categor|catégor|class|interet|intérêt/i.test(n)
+        );
+
+        const champNom = champs.find(n =>
+          /^(nom|name|nom_site|libelle|libellé)$/i.test(n)
+        ) || champs.find(n => /nom|name/i.test(n));
+
+        if (!entites.length) {
+          throw new Error("Le GeoJSON ne contient aucune entité");
+        }
+
+        if (!champCategorie) {
+          document.getElementById("message").textContent =
+            "Champ de catégorie non identifié. Champs disponibles : " +
+            champs.join(", ");
+        }
+
+        const effectifs = {};
+
+        entites.forEach(f => {
+          const cat = champCategorie
+            ? String(f.properties?.[champCategorie] ?? "Non renseigné")
+            : "Non renseigné";
+
+          effectifs[cat] = (effectifs[cat] || 0) + 1;
+        });
+
+        const categories = Object.keys(effectifs).sort();
+
+        function couleurCategorie(cat) {
+          const index = categories.indexOf(cat);
+          return couleurs[index % couleurs.length];
+        }
+
+        // Ajouter les entités à la carte
+        const couche = L.geoJSON(data, {
+          pointToLayer: (feature, latlng) => {
+            const cat = champCategorie
+              ? String(feature.properties?.[champCategorie] ?? "Non renseigné")
+              : "Non renseigné";
+
+            return L.circleMarker(latlng, {
+              radius: 6,
+              color: "#ffffff",
+              weight: 1,
+              fillColor: couleurCategorie(cat),
+              fillOpacity: 0.9
+            });
+          },
+          onEachFeature: (feature, layer) => {
+            const p = feature.properties || {};
+            const nom = champNom
+              ? p[champNom]
+              : "Château ou demeure";
+
+            const cat = champCategorie
+              ? p[champCategorie]
+              : "Non renseigné";
+
+            layer.bindPopup(
+              "<b>" + texte(nom) + "</b><br>" +
+              "Catégorie : " + texte(cat)
+            );
+          }
+        }).addTo(map);
+
+        if (couche.getBounds().isValid()) {
+          map.fitBounds(couche.getBounds(), {
+            padding: [20, 20]
+          });
+        }
+
+        // Calcul des indicateurs
+        const total = entites.length;
+
+        const dominante = categories.reduce((a, b) =>
+          effectifs[a] >= effectifs[b] ? a : b
+        );
+
+        document.getElementById("total").textContent =
+          total.toLocaleString("fr-FR");
+
+        document.getElementById("categories").textContent =
+          categories.length;
+
+        document.getElementById("dominante").textContent =
+          dominante;
+
+        // Graphique à barres
+        const graphique = document.getElementById("graphique");
+        graphique.innerHTML = "";
+
+        const maximum = Math.max(...Object.values(effectifs));
+
+        categories.forEach(cat => {
+          const valeur = effectifs[cat];
+          const label = document.createElement("div");
+          label.textContent = cat + " : " + valeur;
+          graphique.appendChild(label);
+
+          const barre = document.createElement("div");
+          barre.className = "barre";
+          barre.style.backgroundColor = couleurCategorie(cat);
+          barre.style.width = (valeur / maximum * 100) + "%";
+          graphique.appendChild(barre);
+        });
+
+        document.getElementById("interpretation").textContent =
+          "L'analyse recense " + total +
+          " sites dans les données étudiées. La catégorie " +
+          "la plus représentée est « " + dominante +
+          " », avec " + effectifs[dominante] +
+          " sites. La répartition spatiale est consultable " +
+          "sur la carte interactive.";
+
+      })
+      .catch(error => {
+        document.getElementById("message").textContent =
+          "Erreur : " + error.message +
+          ". Vérifiez le dossier data et le nom du fichier.";
+        document.getElementById("graphique").textContent =
+          "Impossible de charger les données.";
+      });
+  </script>
+</body>
+</html>
